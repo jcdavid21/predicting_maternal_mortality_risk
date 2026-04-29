@@ -1709,3 +1709,316 @@ select.field-input { cursor: pointer; }
   animation: fadeIn .4s ease;
 }
 .community-alert-banner svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+/* ═══════════════ TRAINING MODAL ═══════════════ */
+.train-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(4px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+.train-modal-backdrop.hidden { display: none; }
+
+/* Modal is a fixed-height flex column — top part is sticky, log scrolls */
+.train-modal {
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 24px 64px rgba(0,0,0,.18);
+  width: 100%;
+  max-width: 760px;
+  height: 88vh;           /* fixed height so chart never gets pushed away */
+  max-height: 860px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;       /* children control their own scroll */
+}
+
+/* ── Sticky top section (header + bar + steps + chart) ── */
+.train-modal-top {
+  flex-shrink: 0;         /* never shrinks — always visible */
+  padding: 1.4rem 1.75rem 1rem;
+  border-bottom: 1px solid #e2e8f0;
+  background: #fff;
+}
+
+.train-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: .9rem;
+}
+
+.train-modal-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #1e293b;
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+}
+
+/* Overall progress bar */
+.train-modal-top .progress-track {
+  height: 8px;
+  background: #e5e7eb;
+  border-radius: 99px;
+  overflow: hidden;
+  margin-bottom: .6rem;
+}
+.train-modal-top .progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4a7fa5, #3b82f6);
+  border-radius: 99px;
+  transition: width .5s ease;
+}
+
+/* Status + steps row */
+.train-modal-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: .6rem;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+.train-modal-status {
+  font-size: .8rem;
+  color: #6b7280;
+}
+.train-modal-top .progress-steps {
+  display: flex;
+  gap: .35rem;
+  flex-wrap: wrap;
+}
+.train-modal-top .step-item {
+  font-size: .72rem;
+  padding: .18rem .55rem;
+  border-radius: 20px;
+  border: 1px solid #e2e8f0;
+  color: #9ca3af;
+  background: #f9fafb;
+  white-space: nowrap;
+  transition: all .2s;
+}
+.train-modal-top .step-item.active {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+.train-modal-top .step-item.done {
+  background: #f0fdf4;
+  border-color: #86efac;
+  color: #15803d;
+}
+.train-modal-top .step-item.done::before { content: '✓ '; }
+
+/* Chart — fixed height, never shrinks */
+.train-chart-wrap {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: .6rem 1rem .5rem;
+  height: 200px;          /* fixed — chart will not shrink */
+  position: relative;
+  flex-shrink: 0;
+  margin-top: .5rem;
+}
+.train-chart-wrap canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* ── Scrollable bottom section (training log only) ── */
+.train-modal-log {
+  flex: 1;
+  min-height: 0;          /* required for flex scroll children */
+  overflow-y: auto;
+  padding: .85rem 1.75rem 1.25rem;
+  background: #fafafa;
+}
+
+/* Log header */
+.epoch-log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: .78rem;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: .6rem;
+  padding-bottom: .4rem;
+  border-bottom: 1px solid #e5e7eb;
+  position: sticky;
+  top: -12px;
+  background: #fafafa;
+  z-index: 2;
+}
+.epoch-log-live {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  font-size: .72rem;
+  color: #16a34a;
+  font-weight: 500;
+}
+.live-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #16a34a;
+  animation: pulse 1.2s infinite;
+}
+@keyframes pulse {
+  0%,100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: .5; transform: scale(.8); }
+}
+
+/* ── Epoch rows ── */
+.epoch-row {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: .6rem .75rem;
+  margin-bottom: .5rem;
+  font-family: var(--font-mono, 'DM Mono', monospace);
+  font-size: .76rem;
+}
+
+.epoch-header {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-bottom: .35rem;
+}
+.epoch-label { font-size: .8rem; color: #374151; min-width: 90px; }
+
+.epoch-bar-wrap {
+  flex: 1;
+  height: 6px;
+  background: #e5e7eb;
+  border-radius: 99px;
+  overflow: hidden;
+}
+.epoch-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4a7fa5, #3b82f6);
+  border-radius: 99px;
+  transition: width .4s ease;
+}
+.epoch-pct { font-size: .75rem; color: #6b7280; min-width: 34px; text-align: right; }
+
+.epoch-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem;
+  margin-bottom: .3rem;
+}
+.em-chip {
+  padding: .15rem .45rem;
+  border-radius: 5px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: .72rem;
+  font-family: var(--font-mono, monospace);
+  white-space: nowrap;
+}
+.em-chip.metric-good { background: #dcfce7; color: #15803d; }
+.em-chip.metric-mid  { background: #fef3c7; color: #92400e; }
+.em-chip.metric-bad  { background: #fee2e2; color: #991b1b; }
+.em-chip.muted       { background: #f1f5f9; color: #64748b; }
+
+/* Batch log lines — clamp overflow instead of breaking layout */
+.epoch-batch-log {
+  padding-left: .25rem;
+  overflow: hidden;
+}
+.bl {
+  font-family: var(--font-mono, monospace);
+  font-size: .7rem;
+  color: #6b7280;
+  line-height: 1.5;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  display: block;
+}
+
+
+
+/* ── Save Model Banner ─────────────────────────────────────── */
+.save-model-banner {
+  margin-top: 1rem;
+  padding: .75rem 1rem;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  flex-wrap: wrap;
+}
+
+.save-model-info {
+  display: flex;
+  align-items: flex-start;
+  gap: .5rem;
+  font-size: .8rem;
+  color: #92400e;
+  line-height: 1.45;
+  flex: 1;
+  min-width: 0;
+}
+
+.btn-save-model {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .45rem 1rem;
+  background: #1e293b;
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  font-size: .82rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s;
+  font-family: var(--font);
+}
+.btn-save-model:hover    { background: #334155; }
+.btn-save-model:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ── Real Training Status (inline progress after Save) ─────── */
+.real-train-status {
+  margin-top: .75rem;
+  padding: .75rem 1rem;
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  border-radius: 8px;
+}
+.real-train-status.hidden { display: none; }
+
+.rts-inner {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  font-size: .82rem;
+  color: #166534;
+  margin-bottom: .4rem;
+}
+
+.rts-spinner {
+  width: 14px; height: 14px;
+  border: 2px solid #86efac;
+  border-top-color: #16a34a;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+  flex-shrink: 0;
+}

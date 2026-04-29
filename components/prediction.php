@@ -1132,13 +1132,6 @@ $isAdmin    = $_SESSION['is_admin']  ?? false;
 
           <!-- RIGHT: Retrain -->
           <div class="mgmt-col" id="retrainCol">
-            <div id="trainingLockOverlay" class="training-lock hidden">
-              <div class="lock-inner">
-                <div class="spinner"></div>
-                <p>Retraining in progress…</p>
-                <p class="lock-hint">Please do not close or refresh this page.</p>
-              </div>
-            </div>
             <h3 class="sub-section-title">Retrain Model</h3>
 
             <div class="upload-zone" id="uploadZone"
@@ -1170,16 +1163,32 @@ $isAdmin    = $_SESSION['is_admin']  ?? false;
             <div id="trainingProgress" class="training-progress hidden">
               <div class="progress-header">
                 <span class="progress-status" id="progressStatus">Initializing…</span>
+                <span class="epoch-chip" id="epochChip">Epoch 0 / 20</span>
                 <span class="progress-pct" id="progressPct">0%</span>
               </div>
               <div class="progress-track">
                 <div class="progress-fill" id="progressFill" style="width:0%"></div>
               </div>
               <div class="progress-steps" id="progressSteps"></div>
+
+              <!-- Live epoch log console -->
+              <div id="epochLogWrap" class="epoch-log-wrap hidden">
+                <div class="epoch-log-header">
+                  <span>
+                    <svg viewBox="0 0 16 16" fill="none" width="13" height="13" style="vertical-align:-2px;margin-right:4px">
+                      <rect x="1" y="2" width="14" height="12" rx="2" stroke="#4a7fa5" stroke-width="1.2"/>
+                      <path d="M4 6h4M4 9h7M4 12h5" stroke="#4a7fa5" stroke-width="1.1" stroke-linecap="round"/>
+                    </svg>
+                    Training Log
+                  </span>
+                  <span class="epoch-log-live"><span class="live-dot"></span> LIVE</span>
+                </div>
+                <div class="epoch-log-body" id="epochLog"></div>
+              </div>
             </div>
 
             <div id="trainingResults" class="training-results hidden">
-              <p class="results-title"><i class="fas fa-check-circle"></i> Retraining Complete</p>
+              <p class="results-title"><i class="fas fa-check-circle"></i> Simulation Complete</p>
               <div class="metrics-grid">
                 <div class="metric-box"><span class="metric-label">Accuracy</span><span class="metric-value" id="resAccuracy">—</span></div>
                 <div class="metric-box"><span class="metric-label">Precision</span><span class="metric-value" id="resPrecision">—</span></div>
@@ -1188,7 +1197,29 @@ $isAdmin    = $_SESSION['is_admin']  ?? false;
                 <div class="metric-box"><span class="metric-label">AUC-ROC</span><span class="metric-value" id="resAuc">—</span></div>
                 <div class="metric-box"><span class="metric-label">Features</span><span class="metric-value" id="resFeatures" style="font-size:.75rem">—</span></div>
               </div>
-              <p class="results-version" id="resVersion">Saved as: —</p>
+              <p class="results-version" id="resVersion">—</p>
+
+              <!-- Save model banner -->
+              <div class="save-model-banner">
+                <button class="btn btn-save-model" id="saveModelBtn" onclick="saveRealModel()">
+                  <svg viewBox="0 0 20 20" fill="none" width="15" height="15">
+                    <path d="M4 13v2a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-2M10 3v9M7 9l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                  Save &amp; Train XGBoost Model with This Data
+                </button>
+              </div>
+
+              <!-- Real training status (shown after Save is clicked) -->
+              <div id="realTrainStatus" class="real-train-status hidden">
+                <div class="rts-inner">
+                  <div class="rts-spinner"></div>
+                  <span id="realTrainMsg">Training real model in background…</span>
+                  <span id="realTrainPct" style="font-weight:700;color:#1e293b">0%</span>
+                </div>
+                <div class="progress-track" style="margin-top:.5rem">
+                  <div class="progress-fill" id="realTrainFill" style="width:0%"></div>
+                </div>
+              </div>
             </div>
 
             <div id="retrainError" class="alert-box alert-error hidden"></div>
@@ -1209,6 +1240,62 @@ $isAdmin    = $_SESSION['is_admin']  ?? false;
     </section>
 
   </main>
+</div>
+
+<!-- ═══════ TRAINING PROGRESS MODAL ═══════ -->
+<div id="trainingModal" class="train-modal-backdrop hidden" role="dialog" aria-modal="true">
+  <div class="train-modal">
+
+    <!-- STICKY TOP: header + progress bar + steps + chart -->
+    <div class="train-modal-top">
+      <div class="train-modal-header">
+        <span class="train-modal-title">
+          <svg viewBox="0 0 20 20" fill="none" width="18" height="18">
+            <path d="M4 10a6 6 0 0 1 6-6 6 6 0 0 1 5.2 3" stroke="#4a7fa5" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M16 10a6 6 0 0 1-6 6 6 6 0 0 1-5.2-3" stroke="#4a7fa5" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M13.5 7H16V4.5M6.5 13H4V15.5" stroke="#4a7fa5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Model Retraining
+        </span>
+        <div style="display:flex;align-items:center;gap:.6rem">
+          <span class="epoch-chip" id="modalEpochChip">Epoch 0 / 20</span>
+          <span class="progress-pct" id="modalProgressPct" style="font-size:.85rem;font-weight:700;color:#1e293b">0%</span>
+        </div>
+      </div>
+
+      <!-- Overall progress bar -->
+      <div class="progress-track">
+        <div class="progress-fill" id="modalProgressFill" style="width:0%"></div>
+      </div>
+
+      <!-- Status + step pills -->
+      <div class="train-modal-meta">
+        <div class="progress-steps" id="modalProgressSteps"></div>
+        <p class="train-modal-status" id="modalProgressStatus">Initializing…</p>
+      </div>
+
+      <!-- Live loss/acc chart — fixed height, never moves -->
+      <div class="train-chart-wrap">
+        <canvas id="epochChart"></canvas>
+      </div>
+    </div>
+
+    <!-- SCROLLABLE BOTTOM: live epoch log -->
+    <div class="train-modal-log" id="trainModalLog">
+      <div class="epoch-log-header">
+        <span>
+          <svg viewBox="0 0 16 16" fill="none" width="13" height="13" style="vertical-align:-2px;margin-right:4px">
+            <rect x="1" y="2" width="14" height="12" rx="2" stroke="#4a7fa5" stroke-width="1.2"/>
+            <path d="M4 6h4M4 9h7M4 12h5" stroke="#4a7fa5" stroke-width="1.1" stroke-linecap="round"/>
+          </svg>
+          Training Log
+        </span>
+        <span class="epoch-log-live"><span class="live-dot"></span> LIVE</span>
+      </div>
+      <div id="modalEpochLog"></div>
+    </div>
+
+  </div>
 </div>
 
 <div id="toast" class="toast hidden"></div>

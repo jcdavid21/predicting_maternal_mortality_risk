@@ -723,6 +723,259 @@ def progress(job_id):
 
     return jsonify(job)
 
+# ════════════════════════════════════════════════════════════════
+#  SIMULATED TRAINING  (dummy — no real model changes)
+# ════════════════════════════════════════════════════════════════
+import random
+import time as _time
+
+_SIM_EPOCHS = 20
+
+def _sim_train_worker(job_id: str):
+    """
+    Simulated training worker.
+    Produces per-epoch progress updates that look like real training.
+    Does NOT touch any model files or DB rows.
+    """
+    def _upd(**kw):
+        with _jobs_lock:
+            _jobs[job_id].update(kw)
+
+    try:
+        _upd(status='running', percent=0, message='Initializing environment…',
+             current_step='init', logs=[], epochs_done=0, total_epochs=_SIM_EPOCHS)
+
+        _time.sleep(0.6)
+
+        # ── Data loading phase ────────────────────────────────
+        _upd(percent=2, message='Loading dataset…', current_step='loading')
+        _time.sleep(0.5)
+        _upd(percent=4, message='Validating columns & dtypes…')
+        _time.sleep(0.4)
+        _upd(percent=6, message='Splitting train / validation sets (80/20)…')
+        _time.sleep(0.4)
+        _upd(percent=8, message='Applying feature scaling (StandardScaler)…')
+        _time.sleep(0.5)
+        _upd(percent=10, message='Initialising model weights…', current_step='training')
+        _time.sleep(0.6)
+
+        # ── Epoch loop ────────────────────────────────────────
+        # Simulate gradual, realistic convergence
+        base_loss   = random.uniform(1.05, 1.20)
+        base_acc    = random.uniform(0.38, 0.46)
+        base_val_loss = base_loss + random.uniform(0.04, 0.10)
+        base_val_acc  = base_acc  - random.uniform(0.02, 0.06)
+
+        epoch_logs = []
+        for epoch in range(1, _SIM_EPOCHS + 1):
+            # Diminishing improvement per epoch
+            decay       = 1 - (epoch / (_SIM_EPOCHS * 1.3))
+            noise       = random.uniform(-0.008, 0.008)
+            lr          = round(0.001 * (0.95 ** epoch), 6)
+
+            train_loss  = round(max(0.08, base_loss  * decay + noise), 4)
+            train_acc   = round(min(0.99, base_acc   + (1 - decay) * 0.55 + noise), 4)
+            val_loss    = round(max(0.10, base_val_loss * decay + noise * 1.2), 4)
+            val_acc     = round(min(0.98, base_val_acc  + (1 - decay) * 0.52 + noise), 4)
+            f1          = round(train_acc - random.uniform(0.005, 0.02), 4)
+            precision   = round(train_acc - random.uniform(0.003, 0.018), 4)
+            recall      = round(train_acc - random.uniform(0.003, 0.018), 4)
+
+            # Batch-level sub-steps log entries (3 per epoch)
+            steps_per_epoch = random.randint(28, 36)
+            step_a = random.randint(8, 14)
+            step_b = random.randint(step_a + 4, step_a + 12)
+            batch_logs = [
+                f"  {step_a}/{steps_per_epoch} [{'='*int(step_a/steps_per_epoch*20)+'>'+'.'*(20-int(step_a/steps_per_epoch*20))}] "
+                f"- loss: {train_loss + random.uniform(0, 0.08):.4f}",
+                f"  {step_b}/{steps_per_epoch} [{'='*int(step_b/steps_per_epoch*20)+'>'+'.'*(20-int(step_b/steps_per_epoch*20))}] "
+                f"- loss: {train_loss + random.uniform(0, 0.04):.4f} - acc: {train_acc - random.uniform(0, 0.04):.4f}",
+                f"  {steps_per_epoch}/{steps_per_epoch} [{'='*20}] "
+                f"- loss: {train_loss:.4f} - acc: {train_acc:.4f} - val_loss: {val_loss:.4f} - val_acc: {val_acc:.4f} - lr: {lr}",
+            ]
+
+            epoch_entry = {
+                'epoch':     epoch,
+                'total':     _SIM_EPOCHS,
+                'loss':      train_loss,
+                'accuracy':  train_acc,
+                'val_loss':  val_loss,
+                'val_acc':   val_acc,
+                'f1':        f1,
+                'precision': precision,
+                'recall':    recall,
+                'lr':        lr,
+                'batch_logs': batch_logs,
+            }
+            epoch_logs.append(epoch_entry)
+
+            pct = 10 + int((epoch / _SIM_EPOCHS) * 72)   # 10 → 82 %
+            _upd(
+                percent      = pct,
+                message      = f'Epoch {epoch}/{_SIM_EPOCHS} — loss: {train_loss:.4f} — acc: {train_acc*100:.1f}%',
+                current_step = 'training',
+                epochs_done  = epoch,
+                last_epoch   = epoch_entry,
+                logs         = epoch_logs,
+            )
+
+            # Realistic per-epoch timing: ~1.4 s average, slight jitter
+            # ── Keras-style terminal output ───────────────────────────
+            print(f"\nEpoch {epoch}/{_SIM_EPOCHS}", flush=True)
+            for bl in batch_logs:
+                print(bl, flush=True)
+            print(
+                f"  → loss: {train_loss:.4f}  acc: {train_acc:.4f}  "
+                f"val_loss: {val_loss:.4f}  val_acc: {val_acc:.4f}  "
+                f"f1: {f1:.4f}  precision: {precision:.4f}  recall: {recall:.4f}  lr: {lr}",
+                flush=True
+            )
+            _time.sleep(random.uniform(1.1, 1.8))
+
+        # ── Evaluation phase ──────────────────────────────────
+        _upd(percent=84, message='Running final evaluation on test set…', current_step='evaluating')
+        _time.sleep(0.8)
+        _upd(percent=88, message='Computing precision, recall, F1 (weighted)…')
+        _time.sleep(0.6)
+        _upd(percent=91, message='Generating classification report…')
+        _time.sleep(0.5)
+
+        final_epoch = epoch_logs[-1]
+        final_metrics = {
+            'accuracy':  final_epoch['accuracy'],
+            'precision': final_epoch['precision'],
+            'recall':    final_epoch['recall'],
+            'f1':        final_epoch['f1'],
+            'val_loss':  final_epoch['val_loss'],
+            'auc_roc':   round(final_epoch['accuracy'] + random.uniform(-0.01, 0.03), 4),
+        }
+
+        # ── Saving phase ──────────────────────────────────────
+        _upd(percent=94, message='Serialising model weights…', current_step='saving')
+        _time.sleep(0.5)
+        _upd(percent=97, message='Writing checkpoint to disk…')
+        _time.sleep(0.5)
+        _upd(percent=99, message='Updating model registry…')
+        _time.sleep(0.4)
+
+        _upd(
+            status       = 'done',
+            percent      = 100,
+            message      = 'Training complete!',
+            current_step = 'done',
+            metrics      = final_metrics,
+            version_name = f'sim_model_v{random.randint(1,99)}.pkl',
+            logs         = epoch_logs,
+            epochs_done  = _SIM_EPOCHS,
+        )
+
+    except Exception:
+        err = traceback.format_exc()
+        with _jobs_lock:
+            _jobs[job_id].update({
+                'status':  'error',
+                'message': f'Simulation error: {err[:300]}',
+                'percent': 0,
+            })
+
+# ════════════════════════════════════════════════════════════════
+#  SAVE MODEL  — persist the last uploaded CSV as a real trained model
+# ════════════════════════════════════════════════════════════════
+
+# Temporary store for the last validated CSV bytes (keyed by job_id)
+_pending_csv: dict[str, bytes] = {}
+_pending_csv_lock = threading.Lock()
+
+
+@app.route('/retrain-sim', methods=['POST'])
+def retrain_sim():
+    """
+    Accepts a CSV upload but does NOT train a real model.
+    Kicks off _sim_train_worker which simulates realistic training.
+    Also caches the raw CSV bytes so /save-model can use them later.
+    """
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+
+    file = request.files['file']
+    if not file.filename.endswith('.csv'):
+        return jsonify({'error': 'Only CSV files are accepted'}), 400
+
+    try:
+        csv_bytes = file.read()                     # read once, cache raw bytes
+        import io
+        df = pd.read_csv(io.BytesIO(csv_bytes))
+    except Exception as e:
+        return jsonify({'error': f'Could not read CSV: {e}'}), 400
+
+    required_cols = FEATURE_COLS + ['RiskLevel']
+    missing_cols  = [c for c in required_cols if c not in df.columns]
+    if missing_cols:
+        return jsonify({'error': f'Missing columns: {", ".join(missing_cols)}'}), 400
+
+    if len(df) < 50:
+        return jsonify({'error': 'Dataset too small — need at least 50 rows'}), 400
+
+    job_id = str(uuid.uuid4())
+    with _jobs_lock:
+        _jobs[job_id] = {
+            'status':       'running',
+            'percent':      0,
+            'message':      'Starting…',
+            'current_step': 'init',
+            'logs':         [],
+            'epochs_done':  0,
+            'total_epochs': _SIM_EPOCHS,
+        }
+
+    # Cache the CSV for /save-model
+    with _pending_csv_lock:
+        _pending_csv[job_id] = csv_bytes
+
+    thread = threading.Thread(target=_sim_train_worker, args=(job_id,), daemon=True)
+    thread.start()
+
+    return jsonify({'job_id': job_id, 'total_epochs': _SIM_EPOCHS})
+
+
+@app.route('/save-model', methods=['POST'])
+def save_model():
+    """
+    Triggers REAL model training using the CSV that was uploaded during /retrain-sim.
+    Returns a new job_id to poll progress of the actual training.
+    """
+    body   = request.get_json(force=True)
+    job_id = body.get('sim_job_id')          # the job_id from the sim run
+
+    if not job_id:
+        return jsonify({'error': 'sim_job_id is required'}), 400
+
+    with _pending_csv_lock:
+        csv_bytes = _pending_csv.get(job_id)
+
+    if not csv_bytes:
+        return jsonify({'error': 'No CSV found for this session. Please re-upload the file.'}), 404
+
+    import io
+    try:
+        df = pd.read_csv(io.BytesIO(csv_bytes))
+    except Exception as e:
+        return jsonify({'error': f'Could not parse CSV: {e}'}), 400
+
+    real_job_id = str(uuid.uuid4())
+    with _jobs_lock:
+        _jobs[real_job_id] = {
+            'status':       'running',
+            'percent':      0,
+            'message':      'Starting real training…',
+            'current_step': 'preprocessing',
+        }
+
+    thread = threading.Thread(target=_retrain_worker, args=(real_job_id, df), daemon=True)
+    thread.start()
+
+    return jsonify({'job_id': real_job_id})
+
 
 @app.route('/models')
 def list_models():
@@ -1869,5 +2122,14 @@ def server_error(e):
     return jsonify({'error': 'Internal server error'}), 500
 
 
+import logging
+
+class _SuppressProgressPoll(logging.Filter):
+    """Drop the noisy GET /progress/... poll lines from Werkzeug output."""
+    def filter(self, record):
+        return '/progress/' not in record.getMessage()
+
 if __name__ == '__main__':
+    log = logging.getLogger('werkzeug')
+    log.addFilter(_SuppressProgressPoll())
     app.run(debug=True, host='0.0.0.0', port=8800)

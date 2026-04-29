@@ -4,6 +4,15 @@
 
 'use strict';
 
+// ── Chart.js (load once) ──────────────────────────────────────
+(function () {
+  if (document.getElementById('_chartjsScript')) return;
+  const s = document.createElement('script');
+  s.id  = '_chartjsScript';
+  s.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js';
+  document.head.appendChild(s);
+})();
+
 const API_BASE = 'http://localhost:8800';
 
 // ── State ─────────────────────────────────────────────────────
@@ -1729,12 +1738,16 @@ function removeFile() {
 // ═══════════════════════════════════════════════════════════════
 //  RETRAINING
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  RETRAINING — Simulated epoch-based training
+// ═══════════════════════════════════════════════════════════════
 const TRAINING_STEPS = [
-  { key: 'preprocessing', label: 'Preprocessing data…',     pct: 15  },
-  { key: 'training',      label: 'Training models…',        pct: 55  },
-  { key: 'evaluating',    label: 'Evaluating performance…', pct: 80  },
-  { key: 'saving',        label: 'Saving model…',           pct: 95  },
-  { key: 'done',          label: 'Complete!',               pct: 100 },
+  { key: 'init',       label: 'Initializing…',           pct:  8  },
+  { key: 'loading',    label: 'Loading data…',            pct: 10  },
+  { key: 'training',   label: 'Training model…',          pct: 82  },
+  { key: 'evaluating', label: 'Evaluating…',              pct: 91  },
+  { key: 'saving',     label: 'Saving checkpoint…',       pct: 97  },
+  { key: 'done',       label: 'Complete!',                pct: 100 },
 ];
 
 async function startRetraining() {
@@ -1743,24 +1756,27 @@ async function startRetraining() {
 
   document.getElementById('trainingResults')?.classList.add('hidden');
   document.getElementById('retrainBtn').disabled = true;
-  document.getElementById('trainingLockOverlay')?.classList.remove('hidden');
-  renderProgressSteps('preprocessing');
+
+  // Open the modal
+  openTrainingModal();
+  renderProgressSteps('init', 'modal');
   updateProgress(0, 'Starting…');
-  document.getElementById('trainingProgress')?.classList.remove('hidden');
 
   const formData = new FormData();
   formData.append('file', appState.selectedFile);
 
   try {
-    const res  = await fetch(`${API_BASE}/retrain`, { method: 'POST', body: formData });
+    const res  = await fetch(`${API_BASE}/retrain-sim`, { method: 'POST', body: formData });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Retraining failed to start');
-    appState.retrainJobId = data.job_id;
+    appState.retrainJobId      = data.job_id;
+    appState.simJobId = data.job_id; 
+    appState.totalEpochs       = data.total_epochs || 20;
+    appState.lastRenderedEpoch = 0;
     pollProgress(appState.retrainJobId);
   } catch (err) {
     stopPolling();
-    document.getElementById('trainingProgress')?.classList.add('hidden');
-    document.getElementById('trainingLockOverlay')?.classList.add('hidden');
+    closeTrainingModal();
     showError('retrainError', err.message);
     document.getElementById('retrainBtn').disabled = false;
   }
@@ -1771,20 +1787,47 @@ function pollProgress(jobId) {
     try {
       const res  = await fetch(`${API_BASE}/progress/${jobId}`);
       const data = await res.json();
-      renderProgressSteps(data.current_step);
+
+      renderProgressSteps(data.current_step, 'modal');
       updateProgress(data.percent, data.message);
+
+      // Render new epoch rows + update chart
+      if (Array.isArray(data.logs) && data.logs.length > (appState.lastRenderedEpoch || 0)) {
+        const newLogs = data.logs.slice(appState.lastRenderedEpoch || 0);
+        newLogs.forEach(entry => {
+          renderEpochRow(entry, data.total_epochs || appState.totalEpochs || 20, 'modal');
+          updateEpochChart(entry);
+          // ── Terminal output ──────────────────────────────────
+          const ep = entry.epoch, tot = data.total_epochs || appState.totalEpochs || 20;
+          console.log(
+            `[Epoch ${String(ep).padStart(2,'0')}/${tot}] ` +
+            `loss: ${entry.loss.toFixed(4)}  acc: ${(entry.accuracy*100).toFixed(2)}%  ` +
+            `val_loss: ${entry.val_loss.toFixed(4)}  val_acc: ${(entry.val_acc*100).toFixed(2)}%  ` +
+            `f1: ${entry.f1.toFixed(4)}  lr: ${entry.lr}`
+          );
+          entry.batch_logs?.forEach(l => console.log('  ' + l));
+        });
+        appState.lastRenderedEpoch = data.logs.length;
+      }
+
+      // Update epoch chip
+      const chip = document.getElementById('modalEpochChip');
+      if (chip && data.epochs_done != null) {
+        chip.textContent = `Epoch ${data.epochs_done} / ${data.total_epochs || appState.totalEpochs || 20}`;
+      }
+
       if (data.status === 'done') {
         stopPolling();
         onTrainingComplete(data);
       } else if (data.status === 'error') {
         stopPolling();
-        document.getElementById('trainingProgress')?.classList.add('hidden');
-        document.getElementById('trainingLockOverlay')?.classList.add('hidden');
+        closeTrainingModal();
         showError('retrainError', data.message || 'Training failed.');
         document.getElementById('retrainBtn').disabled = false;
       }
     } catch {
       stopPolling();
+      closeTrainingModal();
       showError('retrainError', 'Lost connection to server during training.');
       document.getElementById('retrainBtn').disabled = false;
     }
@@ -1795,19 +1838,76 @@ function stopPolling() {
   if (appState.pollInterval) { clearInterval(appState.pollInterval); appState.pollInterval = null; }
 }
 
+/**
+ * Appends one epoch row to the epoch-log table.
+ * Called incrementally as new epochs arrive from the server.
+ */
+function renderEpochRow(entry, totalEpochs, target = 'inline') {
+  const logId = target === 'modal' ? 'modalEpochLog' : 'epochLog';
+  const logEl = document.getElementById(logId);
+  if (!logEl) return;
+
+  const pct     = Math.round((entry.epoch / totalEpochs) * 100);
+  const barFill = Math.max(2, pct);
+  const lossCls = entry.loss < 0.25 ? 'metric-good' : entry.loss < 0.6 ? 'metric-mid' : 'metric-bad';
+  const accCls  = entry.accuracy > 0.85 ? 'metric-good' : entry.accuracy > 0.65 ? 'metric-mid' : 'metric-bad';
+
+  const row = document.createElement('div');
+  row.className = 'epoch-row';
+  row.innerHTML = `
+    <div class="epoch-header">
+      <span class="epoch-label">Epoch <strong>${entry.epoch}</strong>/${totalEpochs}</span>
+      <div class="epoch-bar-wrap">
+        <div class="epoch-bar-fill" style="width:${barFill}%"></div>
+      </div>
+      <span class="epoch-pct">${pct}%</span>
+    </div>
+    <div class="epoch-metrics">
+      <span class="em-chip ${lossCls}">loss: ${entry.loss.toFixed(4)}</span>
+      <span class="em-chip ${accCls}">acc: ${(entry.accuracy * 100).toFixed(2)}%</span>
+      <span class="em-chip">val_loss: ${entry.val_loss.toFixed(4)}</span>
+      <span class="em-chip">val_acc: ${(entry.val_acc * 100).toFixed(2)}%</span>
+      <span class="em-chip muted">f1: ${entry.f1.toFixed(4)}</span>
+      <span class="em-chip muted">lr: ${entry.lr}</span>
+    </div>
+    <div class="epoch-batch-log">${
+      (entry.batch_logs || []).map(l =>
+        `<div class="bl">${escapeHtml(l)}</div>`
+      ).join('')
+    }</div>
+  `;
+  logEl.appendChild(row);
+  // Scroll the log panel (not the whole modal) to the latest entry
+  const logPanel = document.getElementById('trainModalLog');
+  if (logPanel) {
+    logPanel.scrollTop = logPanel.scrollHeight;
+  } else {
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+}
+
 function updateProgress(pct, message) {
-  const fillEl   = document.getElementById('progressFill');
-  const pctEl    = document.getElementById('progressPct');
-  const statusEl = document.getElementById('progressStatus');
+  // Modal targets
+  const fillEl   = document.getElementById('modalProgressFill');
+  const pctEl    = document.getElementById('modalProgressPct');
+  const statusEl = document.getElementById('modalProgressStatus');
   if (fillEl)   fillEl.style.width   = `${pct}%`;
   if (pctEl)    pctEl.textContent    = `${pct}%`;
   if (statusEl) statusEl.textContent = message;
+  // Also keep inline bar in sync (if still present on page)
+  const iFill = document.getElementById('progressFill');
+  const iPct  = document.getElementById('progressPct');
+  const iStat = document.getElementById('progressStatus');
+  if (iFill) iFill.style.width   = `${pct}%`;
+  if (iPct)  iPct.textContent    = `${pct}%`;
+  if (iStat) iStat.textContent   = message;
 }
 
-function renderProgressSteps(currentStep) {
-  const container  = document.getElementById('progressSteps');
+function renderProgressSteps(currentStep, target = 'inline') {
+  const containerId = target === 'modal' ? 'modalProgressSteps' : 'progressSteps';
+  const container   = document.getElementById(containerId);
   if (!container) return;
-  const currentIdx = TRAINING_STEPS.findIndex(s => s.key === currentStep);
+  const currentIdx  = TRAINING_STEPS.findIndex(s => s.key === currentStep);
   container.innerHTML = TRAINING_STEPS.map((step, i) => {
     const cls = i < currentIdx ? 'done' : i === currentIdx ? 'active' : 'pending';
     return `<div class="step-item ${cls}">${step.label}</div>`;
@@ -1816,9 +1916,9 @@ function renderProgressSteps(currentStep) {
 
 function onTrainingComplete(data) {
   updateProgress(100, 'Complete!');
-  document.getElementById('trainingLockOverlay')?.classList.add('hidden');
+  closeTrainingModal();
 
-  const m = data.metrics || {};
+  const m   = data.metrics || {};
   const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
   set('resAccuracy',  fmtPct(m.accuracy));
   set('resPrecision', fmtPct(m.precision));
@@ -1833,6 +1933,150 @@ function onTrainingComplete(data) {
   loadModelVersions();
   loadModelStatus();
   showToast('Model retrained successfully!', 'success');
+
+  // Final summary to console
+  console.log('%c[Training Complete]', 'color:#16a34a;font-weight:bold', m);
+}
+
+
+// ── Save & train real model ───────────────────────────────────
+async function saveRealModel() {
+  const btn = document.getElementById('saveModelBtn');
+  if (btn) btn.disabled = true;
+
+  const statusEl = document.getElementById('realTrainStatus');
+  const msgEl    = document.getElementById('realTrainMsg');
+  const pctEl    = document.getElementById('realTrainPct');
+  const fillEl   = document.getElementById('realTrainFill');
+  if (statusEl) statusEl.classList.remove('hidden');
+
+  try {
+    const res  = await fetch(`${API_BASE}/save-model`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sim_job_id: appState.simJobId }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to start real training');
+
+    // Poll the real training job
+    const realJobId = data.job_id;
+    const poll = setInterval(async () => {
+      try {
+        const r  = await fetch(`${API_BASE}/progress/${realJobId}`);
+        const d  = await r.json();
+
+        if (msgEl)  msgEl.textContent  = d.message  || 'Training…';
+        if (pctEl)  pctEl.textContent  = `${d.percent || 0}%`;
+        if (fillEl) fillEl.style.width = `${d.percent || 0}%`;
+
+        if (d.status === 'done') {
+          clearInterval(poll);
+          if (msgEl)  msgEl.textContent = '✓ Real model trained & saved!';
+          if (pctEl)  pctEl.textContent = '100%';
+          if (fillEl) fillEl.style.width = '100%';
+          if (statusEl) {
+            statusEl.style.background = '#f0fdf4';
+            statusEl.style.borderColor = '#86efac';
+          }
+          loadModelVersions();
+          loadModelStatus();
+          showToast('Real model saved successfully!', 'success');
+          // Update version label
+          const vEl = document.getElementById('resVersion');
+          if (vEl && d.version_name) vEl.textContent = `Saved as: ${d.version_name}`;
+        } else if (d.status === 'error') {
+          clearInterval(poll);
+          if (msgEl) msgEl.textContent = `Error: ${d.message}`;
+          if (btn)   btn.disabled = false;
+        }
+      } catch {
+        clearInterval(poll);
+        if (msgEl) msgEl.textContent = 'Lost connection during real training.';
+        if (btn)   btn.disabled = false;
+      }
+    }, 1500);
+
+  } catch (err) {
+    if (msgEl)  msgEl.textContent = `Error: ${err.message}`;
+    if (btn)    btn.disabled = false;
+  }
+}
+
+// ── Training modal helpers ────────────────────────────────────
+function openTrainingModal() {
+  const m = document.getElementById('trainingModal');
+  if (!m) return;
+  m.classList.remove('hidden');
+  document.getElementById('modalEpochLog').innerHTML = '';
+  document.getElementById('modalProgressFill').style.width = '0%';
+  document.getElementById('modalProgressPct').textContent  = '0%';
+  document.getElementById('modalProgressStatus').textContent = 'Initializing…';
+  document.getElementById('modalEpochChip').textContent = `Epoch 0 / ${appState.totalEpochs || 20}`;
+  initEpochChart();
+}
+
+function closeTrainingModal() {
+  document.getElementById('trainingModal')?.classList.add('hidden');
+}
+
+// ── Epoch chart (Chart.js) ────────────────────────────────────
+let _epochChart    = null;
+let _chartLabels   = [];
+let _chartLoss     = [];
+let _chartValLoss  = [];
+let _chartAcc      = [];
+let _chartValAcc   = [];
+
+function initEpochChart() {
+  _chartLabels  = [];
+  _chartLoss    = [];
+  _chartValLoss = [];
+  _chartAcc     = [];
+  _chartValAcc  = [];
+
+  if (_epochChart) { _epochChart.destroy(); _epochChart = null; }
+
+  const canvas = document.getElementById('epochChart');
+  if (!canvas || typeof Chart === 'undefined') return;
+
+  _epochChart = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: _chartLabels,
+      datasets: [
+        { label: 'Loss',     data: _chartLoss,    borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,.08)',   tension: .35, pointRadius: 2 },
+        { label: 'Val Loss', data: _chartValLoss, borderColor: '#f97316', backgroundColor: 'rgba(249,115,22,.06)',  tension: .35, pointRadius: 2, borderDash: [4,3] },
+        { label: 'Acc',      data: _chartAcc,     borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,.08)',   tension: .35, pointRadius: 2, yAxisID: 'acc' },
+        { label: 'Val Acc',  data: _chartValAcc,  borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,.06)', tension: .35, pointRadius: 2, yAxisID: 'acc', borderDash: [4,3] },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 200 },
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { title: { display: true, text: 'Epoch', font: { size: 11 } }, ticks: { font: { size: 10 } } },
+        y: { title: { display: true, text: 'Loss',  font: { size: 11 } }, ticks: { font: { size: 10 } }, min: 0 },
+        acc: { position: 'right', title: { display: true, text: 'Accuracy', font: { size: 11 } }, ticks: { font: { size: 10 }, callback: v => (v*100).toFixed(0)+'%' }, min: 0, max: 1, grid: { drawOnChartArea: false } },
+      },
+      plugins: {
+        legend: { labels: { font: { size: 11 }, boxWidth: 12 } },
+        tooltip: { bodyFont: { size: 11 } },
+      },
+    },
+  });
+}
+
+function updateEpochChart(entry) {
+  if (!_epochChart) return;
+  _chartLabels.push(`E${entry.epoch}`);
+  _chartLoss.push(entry.loss);
+  _chartValLoss.push(entry.val_loss);
+  _chartAcc.push(entry.accuracy);
+  _chartValAcc.push(entry.val_acc);
+  _epochChart.update('none'); // 'none' = no animation for real-time feel
 }
 
 // ═══════════════════════════════════════════════════════════════
