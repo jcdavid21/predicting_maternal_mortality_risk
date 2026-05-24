@@ -13,6 +13,11 @@ $userRole   = $_SESSION['role']      ?? 'nurse';
 $isAdmin    = true;
 
 require_once "../backend/user_management_api.php";
+
+if (!isset($_SESSION['user_id'])) {
+    header('Location: logout.php');
+    exit;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">

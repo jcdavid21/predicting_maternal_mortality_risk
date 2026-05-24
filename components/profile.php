@@ -16,12 +16,18 @@ $isAdmin    = ($userRole === 'admin');
 
 require_once("../backend/profile_api.php");
 
+
 /* ── Computed display values ─────────────────────────────────── */
 $initials    = strtoupper(implode('', array_map(
     fn($w) => $w[0],
     array_slice(explode(' ', trim($userName)), 0, 2)
 )));
 $memberSince = date('F Y', strtotime($currentUser['created_at']));
+
+if(!isset($_SESSION['user_id'])) {
+    header('Location: logout.php');
+    exit;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">

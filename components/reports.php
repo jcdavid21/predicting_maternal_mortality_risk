@@ -10,6 +10,11 @@ $initials = implode('', array_map(
     fn($w) => strtoupper($w[0]),
     array_slice(explode(' ', trim($userName)), 0, 2)
 ));
+
+if(!isset($_SESSION['user_id'])) {
+    header('Location: logout.php');
+    exit;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">

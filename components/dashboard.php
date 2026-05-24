@@ -5,6 +5,11 @@ $activePage = 'dashboard';
 $userName   = $_SESSION['full_name'] ?? 'Healthcare Worker';
 $userRole   = $_SESSION['role']      ?? 'nurse';
 $isAdmin    = $_SESSION['is_admin']  ?? false;
+
+if (!isset($_SESSION['user_id'])) {
+    header('Location: logout.php');
+    exit;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
