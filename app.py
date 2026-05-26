@@ -25,9 +25,38 @@ import db  # our thin DB wrapper — see db.py
 
 # ── App Setup ──────────────────────────────────────────────────
 app = Flask(__name__, template_folder='templates', static_folder='static')
+CORS(app, resources={r"/*": {"origins": [
+    "http://localhost",
+    "http://localhost:80",
+    "http://localhost:8080",
+    "http://127.0.0.1",
+    "http://127.0.0.1:80",
+    "http://192.168.100.167",
+    "http://192.168.100.167:80",
+    "http://192.168.100.167:8080"
+]}}, supports_credentials=True)
 
-CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}},
-     supports_credentials=True)
+ALLOWED_ORIGINS = {
+    "http://localhost",
+    "http://localhost:80",
+    "http://localhost:8080",
+    "http://127.0.0.1",
+    "http://127.0.0.1:80",
+    "http://192.168.100.167",
+    "http://192.168.100.167:80",
+    "http://192.168.100.167:8080",
+}
+
+@app.after_request
+def add_cors_headers(response):
+    origin = request.headers.get("Origin", "")
+    if origin in ALLOWED_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, PUT, DELETE"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+        response.headers["Vary"] = "Origin"
+    return response
 
 MODELS_DIR   = Path('models')
 MODELS_DIR.mkdir(exist_ok=True)
@@ -125,7 +154,7 @@ def _sync_patient_snapshot(cur, patient_id, payload):
 # ════════════════════════════════════════════════════════════════
 @app.route('/')
 def index():
-    return render_template('prediction.html')
+    return render_template('index.php')
 
 
 @app.route('/patients/search')
